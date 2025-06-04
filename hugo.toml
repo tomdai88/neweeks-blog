@@ -1,4 +1,4 @@
-baseURL = 'https://example.org/'
+baseURL = "https://www.neweeks.com/"
 languageCode = 'en-us'
 title = 'Neweeks blog'
 theme = "lightbi" # 注意这里的主题名称
