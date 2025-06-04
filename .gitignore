@@ -1,0 +1,20 @@
+# Hugo generated files
+/public/
+/resources/_gen/
+.hugo_build.lock
+
+# Hugo executables (if you build them yourself and don't want to commit)
+# hugo.exe
+# hugo.darwin
+# hugo.linux
+
+# macOS specific files
+.DS_Store
+.localized
+
+# Editor specific files (e.g., VS Code)
+.vscode/
+!/.vscode/settings.json
+!/.vscode/tasks.json
+!/.vscode/launch.json
+!/.vscode/extensions.json
