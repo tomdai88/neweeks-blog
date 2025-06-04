@@ -1,0 +1,4 @@
+baseURL = 'https://example.org/'
+languageCode = 'en-us'
+title = 'Neweeks blog'
+theme = "lightbi-hugo" # 注意这里的主题名称
