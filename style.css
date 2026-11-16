@@ -31,3 +31,5 @@ body > footer p { margin: .2rem 0; }
 @media (max-width: 480px) { html { font-size: 16px; } }
 body.tool { max-width: 56rem; color-scheme: light; --fg: #222; --bg: #fff; --mute: #777; }
 h1 + .list { margin-top: 1.4rem; }
+
+body > footer .disc { margin-top: .8rem; font-size: .8rem; line-height: 1.6; opacity: .85; }
