@@ -33,3 +33,14 @@ body.tool { max-width: 56rem; color-scheme: light; --fg: #222; --bg: #fff; --mut
 h1 + .list { margin-top: 1.4rem; }
 
 body > footer .disc { margin-top: .8rem; font-size: .8rem; line-height: 1.6; opacity: .85; }
+
+/* 主导航下拉菜单：百宝箱 */
+nav details.menu { display: inline-block; position: relative; }
+nav details.menu summary { display: inline; cursor: pointer; list-style: none; }
+nav details.menu summary::-webkit-details-marker { display: none; }
+nav details.menu summary::after { content: " \25BE"; font-size: .8em; }
+nav details.menu[open] summary { color: var(--fg); }
+nav .menu-list { position: absolute; right: 0; top: 100%; z-index: 5; margin-top: .3rem; padding: .35rem 1.1rem;
+  background: var(--bg); border: 1px solid rgba(128,128,128,.35); border-radius: 8px; text-align: center;
+  white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.08); }
+nav .menu-list a { display: block; padding: .25rem 0; text-decoration: none; }

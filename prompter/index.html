@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>提词器</title>
+<meta name="description" content="免费提词器：文字显示在屏幕上方、靠近摄像头，支持匀速滚动、镜像、屏幕常亮，可添加到主屏幕离线使用。">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="提词器">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+:root {
+  --bg: #000;
+  --fg: #fff;
+  --accent: #007AFF;
+  --danger: #ff3b30;
+  --panel: rgba(30, 30, 30, .9);
+  /* 阅读焦点距离屏幕顶部的百分比（数字，不带单位），由脚本按设置更新 */
+  --focus: 15;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+  height: 100vh; height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+button { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+/* ---------- 设置层 ---------- */
+#setup {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: calc(18px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
+  background: #111;
+  overflow-y: auto;
+  transition: transform .3s ease-in-out;
+}
+#setup.hidden { transform: translateY(-100%); visibility: hidden; transition: transform .3s ease-in-out, visibility 0s .3s; }
+.head { text-align: center; flex-shrink: 0; }
+.head h1 { margin: 0; font-size: 1.4rem; color: var(--accent); }
+.head p { margin: 4px 0 0; font-size: .85rem; color: #888; }
+textarea {
+  flex: 1 0 140px;
+  width: 100%;
+  background: #1a1a1a; color: #eee;
+  border: 1px solid #333; border-radius: 12px;
+  padding: 14px; font: 16px/1.5 inherit; font-family: inherit;
+  resize: none; outline: none;
+}
+textarea:focus { border-color: var(--accent); }
+.opts { display: grid; gap: 10px; flex-shrink: 0; }
+.opt { display: grid; gap: 4px; font-size: 13px; color: #aaa; }
+.opt b { color: #fff; font-weight: 600; }
+.checks { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; color: #ccc; }
+.checks label { display: flex; align-items: center; gap: 6px; }
+.checks input { width: 18px; height: 18px; accent-color: var(--accent); }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+.tools button {
+  background: #222; border: 1px solid #333; border-radius: 10px;
+  padding: 9px 14px; font-size: 14px; cursor: pointer;
+}
+.tools button:active { background: #333; }
+.note { margin: 0; font-size: 12px; color: #888; line-height: 1.6; flex-shrink: 0; }
+.note.ok { color: #34c759; }
+.btn-start {
+  flex-shrink: 0; width: 100%;
+  background: var(--accent); color: #fff; border: 0; border-radius: 12px;
+  padding: 15px; font-size: 18px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 4px 15px rgba(0, 122, 255, .3);
+}
+.btn-start:active { transform: scale(.98); }
+
+/* ---------- 提词区 ---------- */
+#prompter { position: fixed; inset: 0; overflow-y: scroll; overscroll-behavior: none; -webkit-overflow-scrolling: touch; }
+#prompter::-webkit-scrollbar { width: 0; background: transparent; }
+#content {
+  width: 90%; max-width: 800px; margin: 0 auto;
+  /* 顶部留白 = 焦点位置，第一句正好在红线；底部留白 = 其余高度，最后一句也能滚到红线 */
+  padding-top: calc(var(--focus) * 1vh);
+  padding-top: calc(var(--focus) * 1dvh);
+  padding-bottom: calc((100 - var(--focus)) * 1vh);
+  padding-bottom: calc((100 - var(--focus)) * 1dvh);
+  font-size: 50px; line-height: 1.6;
+  white-space: pre-wrap;          /* 保留换行和空行，同时可以用 textContent 安全写入 */
+  overflow-wrap: anywhere;
+  text-align: justify; text-align-last: left;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+#content.mirror { transform: scaleX(-1); }
+#guide { position: fixed; left: 0; top: calc(var(--focus) * 1%); width: 100%; border-top: 2px solid rgba(255, 59, 48, .55); z-index: 10; pointer-events: none; }
+#guide-mark {
+  position: fixed; left: calc(6px + env(safe-area-inset-left)); top: calc(var(--focus) * 1% - 12px);
+  color: var(--danger); font-size: 22px; line-height: 24px; opacity: .85; z-index: 10; pointer-events: none;
+}
+#countdown {
+  position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
+  font-size: 30vmin; font-weight: 800; color: #fff; background: rgba(0, 0, 0, .55);
+  pointer-events: none;
+}
+#countdown[hidden] { display: none; }
+
+/* ---------- 悬浮控件 ---------- */
+#top-bar {
+  position: fixed; z-index: 50;
+  top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
+  display: flex; gap: 8px; padding: 5px; border-radius: 30px;
+  background: rgba(0, 0, 0, .6); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px);
+  transition: opacity .5s ease;
+}
+#bottom-bar {
+  position: fixed; z-index: 50;
+  left: 5%; width: 90%; max-width: 640px; margin: 0 auto; right: 5%;
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 12px 18px; border-radius: 20px;
+  background: var(--panel); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, .1);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+  transition: opacity .5s ease;
+}
+.idle #top-bar, .idle #bottom-bar { opacity: 0; pointer-events: none; }
+.icon-btn {
+  width: 40px; height: 40px; flex-shrink: 0; border: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, .1); font-size: 17px; cursor: pointer;
+}
+.icon-btn:active { background: rgba(255, 255, 255, .3); }
+#btn-play { width: 54px; height: 54px; font-size: 22px; background: var(--accent); box-shadow: 0 4px 12px rgba(0, 122, 255, .4); }
+#btn-play.on { background: var(--danger); }
+#btn-exit { background: var(--danger); }
+#btn-top { background: transparent; opacity: .7; font-size: 16px; }
+.speed { flex: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.speed .info { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; color: #999; }
+
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0; background: transparent; }
+input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: #555; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -9px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, .5); }
+input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: #555; }
+input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border: 0; border-radius: 50%; background: #fff; }
+</style>
+</head>
+<body>
+
+<section id="setup" aria-label="设置">
+  <div class="head">
+    <h1>提词器</h1>
+    <p>文字显示在屏幕上方，靠近摄像头，读稿时更像在看镜头</p>
+  </div>
+
+  <textarea id="text" spellcheck="false" aria-label="台词"
+    placeholder="在此粘贴台词…&#10;&#10;【使用技巧】&#10;1. 文字显示在屏幕上方，请盯着红线附近的文字读。&#10;2. 点屏幕任意处播放 / 暂停，播放后按钮 2.5 秒自动隐藏。&#10;3. 蓝牙翻页笔：翻页键前进 / 后退，上下键调速。"></textarea>
+
+  <div class="opts">
+    <label class="opt"><span>红线位置（离屏幕顶部）<b id="focus-val"></b></span>
+      <input type="range" id="focus" min="5" max="45" step="1"></label>
+    <label class="opt"><span>字号 <b id="font-val"></b></span>
+      <input type="range" id="font" min="20" max="150" step="2"></label>
+    <div class="checks">
+      <label><input type="checkbox" id="chk-countdown"> 开始前倒计时 3 秒</label>
+      <label><input type="checkbox" id="chk-mirror"> 镜像（反光提词板用）</label>
+    </div>
+  </div>
+
+  <div class="tools">
+    <button type="button" id="btn-import">导入 txt</button>
+    <button type="button" id="btn-clear">清空</button>
+    <button type="button" id="btn-install" hidden>添加到主屏幕</button>
+    <input type="file" id="file" accept=".txt,text/plain" hidden>
+  </div>
+
+  <p class="note" id="status" hidden></p>
+  <p class="note" id="hint" hidden></p>
+
+  <button type="button" class="btn-start" id="btn-start">开始提词</button>
+</section>
+
+<main id="prompter" aria-label="提词内容">
+  <div id="content"></div>
+</main>
+<div id="guide"></div>
+<div id="guide-mark" aria-hidden="true">▶</div>
+<div id="countdown" hidden aria-live="assertive"></div>
+
+<div id="top-bar" hidden>
+  <button type="button" class="icon-btn" id="btn-bigger" aria-label="加大字号">A+</button>
+  <button type="button" class="icon-btn" id="btn-smaller" aria-label="减小字号">A-</button>
+  <button type="button" class="icon-btn" id="btn-mirror" aria-label="镜像">⇄</button>
+  <button type="button" class="icon-btn" id="btn-exit" aria-label="退出">✕</button>
+</div>
+
+<div id="bottom-bar" hidden>
+  <button type="button" class="icon-btn" id="btn-top" aria-label="回到开头">⏮</button>
+  <div class="speed">
+    <div class="info"><span>速度</span><span id="speed-val"></span></div>
+    <input type="range" id="speed" min="0" max="5" step="0.1" aria-label="滚动速度">
+  </div>
+  <button type="button" class="icon-btn" id="btn-play" aria-label="播放 / 暂停">▶</button>
+</div>
+
+<noscript><p style="position:fixed;inset:0;z-index:999;background:#000;color:#fff;padding:2em">提词器需要开启 JavaScript。</p></noscript>
+
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  const SAMPLE = '各位朋友大家好，这是一个针对眼神接触优化的提词器。\n您看，文字显示在屏幕的最上方，也就是那条红线的位置。\n当我盯着红线读稿子时，我的视线正好就在摄像头附近。\n这样观众会觉得我在直视他们的眼睛，交流感非常强。';
+  const KEY = 'neweeks-prompter-v1';
+  const DEFAULTS = { text: SAMPLE, font: 50, speed: 2, focus: 15, mirror: false, countdown: true };
+
+  // ---------- 设置（保存在本机，离线也在） ----------
+  let cfg = Object.assign({}, DEFAULTS);
+  try { Object.assign(cfg, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch (e) {} };
+
+  const setup = $('setup'), text = $('text'), prompter = $('prompter'), content = $('content');
+  const topBar = $('top-bar'), bottomBar = $('bottom-bar'), cd = $('countdown');
+  const btnPlay = $('btn-play'), speedEl = $('speed'), speedVal = $('speed-val');
+
+  let prompting = false, playing = false, raf = 0, last = 0;
+  let pos = 0, lastTop = 0;           // pos：带小数的滚动位置，保证慢速也平滑
+  let cdTimer = null, idleTimer = 0, wakeLock = null;
+
+  // ---------- 外观 ----------
+  function applyFocus() {
+    document.documentElement.style.setProperty('--focus', cfg.focus);
+    $('focus').value = cfg.focus; $('focus-val').textContent = cfg.focus + '%';
+  }
+  function applyFont() {
+    content.style.fontSize = cfg.font + 'px';
+    $('font').value = cfg.font; $('font-val').textContent = cfg.font;
+  }
+  function applyMirror() { content.classList.toggle('mirror', cfg.mirror); $('chk-mirror').checked = cfg.mirror; }
+  function applySpeed() { speedEl.value = cfg.speed; speedVal.textContent = cfg.speed.toFixed(1); }
+
+  text.value = cfg.text;
+  $('chk-countdown').checked = cfg.countdown;
+  applyFocus(); applyFont(); applyMirror(); applySpeed();
+
+  // ---------- 设置页交互 ----------
+  let saveTimer = 0;
+  text.addEventListener('input', () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => { cfg.text = text.value; save(); }, 400); });
+  $('focus').addEventListener('input', e => { cfg.focus = +e.target.value; applyFocus(); save(); });
+  $('font').addEventListener('input', e => { cfg.font = +e.target.value; applyFont(); save(); });
+  $('chk-countdown').addEventListener('change', e => { cfg.countdown = e.target.checked; save(); });
+  $('chk-mirror').addEventListener('change', e => { cfg.mirror = e.target.checked; applyMirror(); save(); });
+  $('btn-clear').addEventListener('click', () => { if (!text.value || confirm('清空当前台词？')) { text.value = ''; cfg.text = ''; save(); text.focus(); } });
+  $('btn-import').addEventListener('click', () => $('file').click());
+  $('file').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { text.value = await f.text(); cfg.text = text.value; save(); } catch (err) { alert('读取文件失败，请确认是 UTF-8 编码的 txt 文件。'); }
+    e.target.value = '';
+  });
+
+  // ---------- 开始 / 退出 ----------
+  function start() {
+    const t = text.value;
+    if (!t.trim()) { text.focus(); return; }
+    cfg.text = t; save();
+    content.textContent = t;                  // 用 textContent：台词里的 < > & 不会被当成代码
+    prompting = true;
+    setup.classList.add('hidden');
+    topBar.hidden = bottomBar.hidden = false;
+    prompter.scrollTop = 0; pos = lastTop = 0;
+    setPlaying(false);
+    showControls();
+    requestWakeLock();
+    const el = document.documentElement;
+    if (!isStandalone() && document.fullscreenEnabled && el.requestFullscreen) el.requestFullscreen().catch(() => {});
+  }
+  function stop() {
+    stopCountdown(); setPlaying(false); prompting = false;
+    setup.classList.remove('hidden');
+    topBar.hidden = bottomBar.hidden = true;
+    document.body.classList.remove('idle');
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  }
+  $('btn-start').addEventListener('click', start);
+  $('btn-exit').addEventListener('click', stop);
+
+  // ---------- 滚动引擎：按时间匀速，不随屏幕刷新率变快变慢 ----------
+  // 速度换算成「每秒像素」= 速度 × 字号 × 0.6，所以改字号后阅读节奏不变
+  function frame(t) {
+    if (!playing) return;
+    const dt = last ? Math.min((t - last) / 1000, 0.1) : 0;
+    last = t;
+    if (Math.abs(prompter.scrollTop - lastTop) > 1.5) pos = prompter.scrollTop;   // 手指拖动过，以实际位置为准
+    pos += cfg.speed * cfg.font * 0.6 * dt;
+    prompter.scrollTop = pos;
+    lastTop = prompter.scrollTop;
+    if (lastTop + prompter.clientHeight >= prompter.scrollHeight - 2) { setPlaying(false); return; }  // 到底
+    raf = requestAnimationFrame(frame);
+  }
+  function setPlaying(v) {
+    playing = v;
+    btnPlay.textContent = v ? '⏸' : '▶';
+    btnPlay.classList.toggle('on', v);
+    cancelAnimationFrame(raf);
+    if (v) { last = 0; raf = requestAnimationFrame(frame); resetIdle(); } else { showControls(); }
+  }
+  function togglePlay() {
+    if (cdTimer) { stopCountdown(); return; }                     // 倒计时中点一下取消
+    if (playing) { setPlaying(false); return; }
+    if (cfg.countdown && prompter.scrollTop <= 2) { startCountdown(3, () => setPlaying(true)); return; }
+    setPlaying(true);
+  }
+  function startCountdown(n, done) {
+    cd.hidden = false; cd.textContent = n;
+    cdTimer = setInterval(() => { n--; if (n <= 0) { stopCountdown(); done(); } else cd.textContent = n; }, 1000);
+  }
+  function stopCountdown() { clearInterval(cdTimer); cdTimer = null; cd.hidden = true; }
+
+  function setSpeed(v) { cfg.speed = clamp(Math.round(v * 10) / 10, 0, 5); applySpeed(); save(); }
+  function jump(dir) {                                             // 翻页：前进 / 后退 80% 屏
+    prompter.scrollTop += dir * prompter.clientHeight * 0.8;
+    pos = lastTop = prompter.scrollTop;
+  }
+  function toTop() { prompter.scrollTop = 0; pos = lastTop = 0; }
+  function changeFont(d) {
+    const max = prompter.scrollHeight - prompter.clientHeight;
+    const ratio = max > 0 ? prompter.scrollTop / max : 0;          // 改字号后停在文稿的同一处
+    cfg.font = clamp(cfg.font + d, 20, 150); applyFont(); save();
+    prompter.scrollTop = ratio * (prompter.scrollHeight - prompter.clientHeight);
+    pos = lastTop = prompter.scrollTop;
+  }
+  function toggleMirror() { cfg.mirror = !cfg.mirror; applyMirror(); save(); }
+
+  speedEl.addEventListener('input', e => setSpeed(+e.target.value));
+  btnPlay.addEventListener('click', togglePlay);
+  $('btn-top').addEventListener('click', toTop);
+  $('btn-bigger').addEventListener('click', () => changeFont(5));
+  $('btn-smaller').addEventListener('click', () => changeFont(-5));
+  $('btn-mirror').addEventListener('click', toggleMirror);
+  prompter.addEventListener('click', togglePlay);
+
+  // ---------- 控件自动隐藏 ----------
+  function showControls() { document.body.classList.remove('idle'); clearTimeout(idleTimer); }
+  function resetIdle() { clearTimeout(idleTimer); if (playing) idleTimer = setTimeout(() => document.body.classList.add('idle'), 2500); }
+  ['pointerdown', 'pointermove'].forEach(ev => document.addEventListener(ev, () => { if (prompting) { showControls(); resetIdle(); } }, { passive: true }));
+
+  // ---------- 键盘 / 蓝牙翻页笔 ----------
+  document.addEventListener('keydown', e => {
+    if (!prompting) return;
+    const k = e.key;
+    const handled = () => { e.preventDefault(); showControls(); resetIdle(); };
+    if (k === ' ' || k === 'Enter') { handled(); togglePlay(); }
+    else if (k === 'ArrowUp') { handled(); setSpeed(cfg.speed + 0.5); }
+    else if (k === 'ArrowDown') { handled(); setSpeed(cfg.speed - 0.5); }
+    else if (k === 'PageDown' || k === 'ArrowRight') { handled(); jump(1); }
+    else if (k === 'PageUp' || k === 'ArrowLeft') { handled(); jump(-1); }
+    else if (k === 'Home' || k === 'r' || k === 'R') { handled(); toTop(); }
+    else if (k === '+' || k === '=') { handled(); changeFont(5); }
+    else if (k === '-' || k === '_') { handled(); changeFont(-5); }
+    else if (k === 'm' || k === 'M') { handled(); toggleMirror(); }
+    else if (k === 'Escape') { stop(); }
+  });
+
+  // ---------- 屏幕常亮（切走再回来要重新申请） ----------
+  async function requestWakeLock() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => { if (prompting && document.visibilityState === 'visible') requestWakeLock(); });
+
+  // ---------- 安装到主屏幕 / 离线 ----------
+  function isStandalone() { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }
+  const hint = $('hint'), status = $('status'), btnInstall = $('btn-install');
+  let installEvt = null;
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; btnInstall.hidden = false; });
+  btnInstall.addEventListener('click', async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; btnInstall.hidden = true; });
+  window.addEventListener('appinstalled', () => { btnInstall.hidden = true; hint.hidden = true; });
+
+  if (!isStandalone()) {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    hint.textContent = ios
+      ? '添加到主屏幕：在 Safari 点底部「分享」按钮 →「添加到主屏幕」，之后无网络也能用。'
+      : '添加到主屏幕：点浏览器菜单 →「安装应用」或「添加到主屏幕」，之后无网络也能用。';
+    hint.hidden = false;
+  }
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.ready.then(() => { status.textContent = '✓ 已缓存，可离线使用'; status.className = 'note ok'; status.hidden = false; });
+  }
+})();
+</script>
+</body>
+</html>
